@@ -5550,6 +5550,13 @@ public final class Settings {
         };
 
         /**
+         *  Volume rocker wake
+         * @hide
+         */
+        public static final String VOLUME_ROCKER_WAKE = "volume_rocker_wake";
+        
+        
+        /**
          * These are all public system settings
          *
          * @hide
@@ -5660,6 +5667,8 @@ public final class Settings {
             PRIVATE_SETTINGS.add(DISPLAY_COLOR_MODE);
             PRIVATE_SETTINGS.add(DISPLAY_COLOR_MODE_VENDOR_HINT);
             PRIVATE_SETTINGS.add(DESKTOP_MODE);
+            PRIVATE_SETTINGS.add(VOLUME_ROCKER_WAKE);
+
         }
 
         /**
