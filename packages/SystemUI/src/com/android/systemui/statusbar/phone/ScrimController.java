@@ -31,6 +31,7 @@ import android.os.Trace;
 import android.util.Log;
 import android.util.MathUtils;
 import android.util.Pair;
+import android.view.CrossWindowBlurListeners;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.view.animation.DecelerateInterpolator;
@@ -180,6 +181,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
      */
     public static final float BUSY_SCRIM_ALPHA = 1f;
 
+    public static float QS_CLIP_SCRIM_ALPHA = 0.80f;
+
     /**
      * Scrim opacity that can have text on top.
      */
@@ -308,6 +311,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         mLargeScreenShadeInterpolator = largeScreenShadeInterpolator;
         mFeatureFlags = featureFlags;
         mDefaultScrimAlpha = BUSY_SCRIM_ALPHA;
+        CrossWindowBlurListeners mBlurSupport = CrossWindowBlurListeners.getInstance();
+        QS_CLIP_SCRIM_ALPHA = mBlurSupport.isCrossWindowBlurEnabled() ? 0.8f : 1.0f;
 
         mKeyguardStateController = keyguardStateController;
         mDarkenWhileDragging = !mKeyguardStateController.canDismissLockScreen();
@@ -373,6 +378,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             states[i].init(mScrimInFront, mScrimBehind, mDozeParameters, mDockManager);
             states[i].setScrimBehindAlphaKeyguard(mScrimBehindAlphaKeyguard);
             states[i].setDefaultScrimAlpha(mDefaultScrimAlpha);
+            states[i].setQSClipScrimAlpha(QS_CLIP_SCRIM_ALPHA);
         }
 
         mScrimBehind.setDefaultFocusHighlightEnabled(false);
@@ -845,23 +851,15 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             return;
         }
 
-        if (mState == ScrimState.UNLOCKED || mState == ScrimState.DREAMING) {
-            final boolean occluding =
-                    mOccludeAnimationPlaying || mState.mLaunchingAffordanceWithPreview;
-            // Darken scrim as it's pulled down while unlocked. If we're unlocked but playing the
-            // screen off/occlusion animations, ignore expansion changes while those animations
-            // play.
-            if (!mScreenOffAnimationController.shouldExpandNotifications()
-                    && !mAnimatingPanelExpansionOnUnlock
-                    && !occluding) {
-                if (mTransparentScrimBackground) {
-                    mBehindAlpha = 0;
-                    mNotificationsAlpha = 0;
-                } else if (mClipsQsScrim) {
-                    float behindFraction = getInterpolatedFraction();
-                    behindFraction = (float) Math.pow(behindFraction, 0.8f);
-                    mBehindAlpha = 1;
-                    mNotificationsAlpha = behindFraction * mDefaultScrimAlpha;
+        if (mState == ScrimState.UNLOCKED) {
+            // Darken scrim as you pull down the shade when unlocked, unless the shade is expanding
+            // because we're doing the screen off animation.
+            if (!mUnlockedScreenOffAnimationController.isScreenOffAnimationPlaying()) {
+                float behindFraction = getInterpolatedFraction();
+                behindFraction = (float) Math.pow(behindFraction, 0.8f);
+                if (mClipsQsScrim) {
+                    mBehindAlpha = QS_CLIP_SCRIM_ALPHA;
+                    mNotificationsAlpha = behindFraction * QS_CLIP_SCRIM_ALPHA;
                 } else {
                     if (mFeatureFlags.isEnabled(Flags.LARGE_SHADE_GRANULAR_ALPHA_INTERPOLATION)) {
                         mBehindAlpha = mLargeScreenShadeInterpolator.getBehindScrimAlpha(
@@ -916,7 +914,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             if (mClipsQsScrim) {
                 mNotificationsAlpha = behindAlpha;
                 mNotificationsTint = behindTint;
-                mBehindAlpha = 1;
+                mBehindAlpha = QS_CLIP_SCRIM_ALPHA;
                 mBehindTint = Color.TRANSPARENT;
             } else {
                 mBehindAlpha = behindAlpha;
@@ -968,7 +966,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         float behindAlpha;
         int behindTint = state.getBehindTint();
         if (mDarkenWhileDragging) {
-            behindAlpha = MathUtils.lerp(mDefaultScrimAlpha, stateBehind,
+            behindAlpha = MathUtils.lerp(QS_CLIP_SCRIM_ALPHA, stateBehind,
                     interpolatedFract);
         } else {
             behindAlpha = MathUtils.lerp(0 /* start */, stateBehind,
@@ -984,17 +982,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             }
         }
         if (mQsExpansion > 0) {
-            behindAlpha = MathUtils.lerp(behindAlpha, mDefaultScrimAlpha, mQsExpansion);
-            float tintProgress = mQsExpansion;
-            if (mStatusBarKeyguardViewManager.isPrimaryBouncerInTransit()) {
-                // this is case of - on lockscreen - going from expanded QS to bouncer.
-                // Because mQsExpansion is already interpolated and transition between tints
-                // is too slow, we want to speed it up and make it more aligned to bouncer
-                // showing up progress. This issue is visible on large screens, both portrait and
-                // split shade because then transition is between very different tints
-                tintProgress = BouncerPanelExpansionCalculator
-                        .showBouncerProgress(mPanelExpansionFraction);
-            }
+            behindAlpha = MathUtils.lerp(behindAlpha, QS_CLIP_SCRIM_ALPHA, mQsExpansion);
             int stateTint = mClipsQsScrim ? ScrimState.SHADE_LOCKED.getNotifTint()
                     : ScrimState.SHADE_LOCKED.getBehindTint();
             behindTint = ColorUtils.blendARGB(behindTint, stateTint, tintProgress);
@@ -1473,15 +1461,13 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         if (mScrimBehind == null) return;
         int background = Utils.getColorAttr(mScrimBehind.getContext(),
                 android.R.attr.colorBackgroundFloating).getDefaultColor();
-        int surfaceBackground = Utils.getColorAttr(mScrimBehind.getContext(),
-                com.android.internal.R.attr.colorSurfaceHeader).getDefaultColor();
         int accent = Utils.getColorAccent(mScrimBehind.getContext()).getDefaultColor();
         mColors.setMainColor(background);
         mColors.setSecondaryColor(accent);
         mColors.setSupportsDarkText(
                 ColorUtils.calculateContrast(mColors.getMainColor(), Color.WHITE) > 4.5);
 
-        mBehindColors.setMainColor(surfaceBackground);
+        mBehindColors.setMainColor(background);
         mBehindColors.setSecondaryColor(accent);
         mBehindColors.setSupportsDarkText(
                 ColorUtils.calculateContrast(mBehindColors.getMainColor(), Color.WHITE) > 4.5);

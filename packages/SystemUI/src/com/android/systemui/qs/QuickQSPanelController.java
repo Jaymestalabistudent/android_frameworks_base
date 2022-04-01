@@ -45,7 +45,16 @@ import javax.inject.Provider;
 @QSScope
 public class QuickQSPanelController extends QSPanelControllerBase<QuickQSPanel> {
 
-    private final Provider<Boolean> mUsingCollapsedLandscapeMediaProvider;
+    private final QSPanel.OnConfigurationChangedListener mOnConfigurationChangedListener =
+            newConfig -> {
+                int newMaxTiles = getResources().getInteger(R.integer.quick_qs_panel_max_tiles);
+                if (newMaxTiles != mView.getNumQuickTiles()) {
+                    setMaxTiles(newMaxTiles);
+                }
+                mView.updateColumns();
+            };
+
+    private final FooterActionsController mFooterActionsController;
 
     @Inject
     QuickQSPanelController(QuickQSPanel view, QSHost qsHost,
@@ -90,6 +99,9 @@ public class QuickQSPanelController extends QSPanelControllerBase<QuickQSPanel> 
     @Override
     protected void onViewAttached() {
         super.onViewAttached();
+        mView.addOnConfigurationChangedListener(mOnConfigurationChangedListener);
+        mView.updateColumns();
+        mBrightnessMirrorHandler.onQsPanelAttached();
     }
 
     @Override
@@ -99,6 +111,7 @@ public class QuickQSPanelController extends QSPanelControllerBase<QuickQSPanel> 
 
     private void setMaxTiles(int parseNumTiles) {
         mView.setMaxTiles(parseNumTiles);
+        mView.updateColumns();
         setTiles();
     }
 
